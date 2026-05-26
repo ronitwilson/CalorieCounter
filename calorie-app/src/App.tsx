@@ -6,9 +6,11 @@ import DayView from './components/meals/DayView'
 import FoodCatalog from './components/food/FoodCatalog'
 import WeeklyChart from './components/reports/WeeklyChart'
 import MonthlyChart from './components/reports/MonthlyChart'
+import ReportsPage from './components/reports/ReportsPage'
 import UserManagement from './components/admin/UserManagement'
 import MealConfig from './components/admin/MealConfig'
 import SharedDayView from './components/sharing/SharedDayView'
+import LinkedMembersPanel from './components/members/LinkedMembersPanel'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const currentUser = useAuthStore((s) => s.currentUser)
@@ -38,20 +40,13 @@ export default function App() {
           }
         >
           <Route index element={<DayView />} />
+          <Route path="food" element={<RequireAdmin><FoodCatalog /></RequireAdmin>} />
+          <Route path="reports" element={<ReportsPage />} />
           <Route path="reports/weekly" element={<WeeklyChart />} />
           <Route path="reports/monthly" element={<MonthlyChart />} />
-          <Route
-            path="food-catalog"
-            element={<RequireAdmin><FoodCatalog /></RequireAdmin>}
-          />
-          <Route
-            path="admin/users"
-            element={<RequireAdmin><UserManagement /></RequireAdmin>}
-          />
-          <Route
-            path="admin/meal-config"
-            element={<RequireAdmin><MealConfig /></RequireAdmin>}
-          />
+          <Route path="members" element={<LinkedMembersPanel />} />
+          <Route path="admin/users" element={<RequireAdmin><UserManagement /></RequireAdmin>} />
+          <Route path="admin/meal-config" element={<RequireAdmin><MealConfig /></RequireAdmin>} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

@@ -8,7 +8,7 @@ import {
   MEAL_SLOTS,
 } from '../types';
 import { getMealEntries, getUser } from '../store/db';
-import { getWeekRange, getMonthDays, addDays, formatDate, parseDate } from './calories';
+import { getWeekRange, getMonthDays, addDays } from './calories';
 
 // ─── Daily Summary ────────────────────────────────────────────────────────────
 
