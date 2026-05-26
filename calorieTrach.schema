@@ -1,0 +1,550 @@
+# ============================================================
+# CalorieTrack — AppSync GraphQL Schema
+# Version: 1.0 | May 2026
+# Auth: AWS Cognito User Pool
+# Groups: "admin" | "user"
+# ============================================================
+
+
+# ─────────────────────────────────────────────────────────────
+# SCALARS & ENUMS
+# ─────────────────────────────────────────────────────────────
+
+scalar AWSDateTime
+scalar AWSJSON
+
+enum UserRole {
+  admin
+  user
+}
+
+enum UserStatus {
+  active
+  inactive
+}
+
+enum FoodCategory {
+  Grains
+  Protein
+  Dairy
+  Vegetables
+  Fruits
+  Snacks
+  Beverages
+}
+
+enum FoodStatus {
+  active
+  deleted
+}
+
+enum MealSlot {
+  breakfast
+  morning_snack
+  lunch
+  evening_snack
+  dinner
+}
+
+enum ShareMethod {
+  link
+  inapp
+}
+
+enum ShareStatus {
+  active
+  revoked
+}
+
+enum NotificationType {
+  share_received
+  share_viewed
+  member_linked
+}
+
+
+# ─────────────────────────────────────────────────────────────
+# TYPES
+# ─────────────────────────────────────────────────────────────
+
+type User {
+  userId:      ID!
+  email:       String!
+  name:        String!
+  role:        UserRole!
+  calorieGoal: Int!
+  status:      UserStatus!
+  invitedBy:   ID
+  createdAt:   AWSDateTime!
+}
+
+type FoodItem {
+  foodId:          ID!
+  name:            String!
+  caloriesPer100g: Int!
+  category:        FoodCategory!
+  createdBy:       ID!
+  status:          FoodStatus!
+  createdAt:       AWSDateTime!
+}
+
+# One item per food logged within a meal slot on a given day.
+# calories is pre-computed and stored: (caloriesPer100g / 100) * grams
+type MealEntry {
+  entryId:         ID!
+  userId:          ID!
+  date:            String!        # YYYY-MM-DD
+  mealSlot:        MealSlot!
+  foodId:          ID!
+  foodName:        String!        # snapshot — not affected by later edits
+  caloriesPer100g: Int!           # snapshot
+  grams:           Int!
+  calories:        Int!           # stored computed value
+  loggedBy:        ID!            # same as userId for self; differs for proxy/admin
+  createdAt:       AWSDateTime!
+}
+
+type ServingSize {
+  sizeId:    ID!
+  mealSlot:  MealSlot!
+  grams:     Int!
+  createdBy: ID!
+  createdAt: AWSDateTime!
+}
+
+type LinkedMember {
+  linkId:    ID!
+  ownerId:   ID!
+  memberId:  ID!
+  memberName: String!             # denormalised for display
+  linkedAt:  AWSDateTime!
+  linkedBy:  ID!                  # admin who created the link
+}
+
+type SharedDay {
+  shareId:         ID!
+  token:           String!        # URL-safe token for link sharing
+  sharedByUserId:  ID!
+  sharedByName:    String!        # denormalised
+  date:            String!        # YYYY-MM-DD
+  method:          ShareMethod!
+  recipientUserId: ID             # populated for inapp shares
+  status:          ShareStatus!
+  expiresAt:       AWSDateTime!
+  createdAt:       AWSDateTime!
+}
+
+type Notification {
+  notifId:      ID!
+  userId:       ID!
+  type:         NotificationType!
+  fromUserId:   ID!
+  fromUserName: String!           # denormalised — no extra lookup needed
+  shareId:      ID                # populated for share_received / share_viewed
+  read:         Boolean!
+  createdAt:    AWSDateTime!
+}
+
+# ── Computed / aggregate types (resolved via Lambda) ─────────
+
+type DailySummary {
+  userId:          ID!
+  date:            String!
+  calorieGoal:     Int!
+  totalCalories:   Int!
+  remaining:       Int!           # calorieGoal - totalCalories (can be negative)
+  percentOfGoal:   Float!
+  byMealSlot:      [MealSlotSummary!]!
+}
+
+type MealSlotSummary {
+  mealSlot:     MealSlot!
+  totalCalories: Int!
+  entries:       [MealEntry!]!
+}
+
+type DayTotals {
+  date:          String!          # YYYY-MM-DD
+  totalCalories: Int!
+  calorieGoal:   Int!
+  withinGoal:    Boolean!
+}
+
+type WeeklySummary {
+  userId:           ID!
+  startDate:        String!
+  endDate:          String!
+  days:             [DayTotals!]!
+  averageCalories:  Int!
+  daysWithinGoal:   Int!
+  daysOverGoal:     Int!
+}
+
+type MonthlySummary {
+  userId:           ID!
+  year:             Int!
+  month:            Int!
+  days:             [DayTotals!]!
+  averageCalories:  Int!
+  daysWithinGoal:   Int!
+  daysOverGoal:     Int!
+  bestDay:          DayTotals     # closest to goal without going over
+  worstDay:         DayTotals     # furthest over goal
+}
+
+# ── Pagination wrappers ───────────────────────────────────────
+
+type UserConnection {
+  items:     [User!]!
+  nextToken: String
+}
+
+type FoodItemConnection {
+  items:     [FoodItem!]!
+  nextToken: String
+}
+
+type MealEntryConnection {
+  items:     [MealEntry!]!
+  nextToken: String
+}
+
+type NotificationConnection {
+  items:     [Notification!]!
+  nextToken: String
+  unreadCount: Int!
+}
+
+type SharedDayConnection {
+  items:     [SharedDay!]!
+  nextToken: String
+}
+
+
+# ─────────────────────────────────────────────────────────────
+# INPUT TYPES
+# ─────────────────────────────────────────────────────────────
+
+input CreateUserInput {
+  email:       String!
+  name:        String!
+  role:        UserRole!
+  calorieGoal: Int!
+}
+
+input UpdateUserInput {
+  userId:      ID!
+  name:        String
+  role:        UserRole
+  calorieGoal: Int
+  status:      UserStatus
+}
+
+input CreateFoodItemInput {
+  name:            String!
+  caloriesPer100g: Int!
+  category:        FoodCategory!
+}
+
+input UpdateFoodItemInput {
+  foodId:          ID!
+  name:            String
+  caloriesPer100g: Int
+  category:        FoodCategory
+}
+
+input CreateMealEntryInput {
+  # targetUserId: if logging for a linked member or (admin) any user.
+  # Omit to log for self.
+  targetUserId: ID
+  date:         String!
+  mealSlot:     MealSlot!
+  foodId:       ID!
+  grams:        Int!
+}
+
+input UpdateMealEntryInput {
+  entryId:  ID!
+  userId:   ID!          # required to reconstruct the DynamoDB PK
+  date:     String!      # required to reconstruct the SK
+  mealSlot: MealSlot!    # required to reconstruct the SK
+  grams:    Int!
+}
+
+input DeleteMealEntryInput {
+  entryId:  ID!
+  userId:   ID!
+  date:     String!
+  mealSlot: MealSlot!
+}
+
+input CreateServingSizeInput {
+  mealSlot: MealSlot!
+  grams:    Int!
+}
+
+input ShareDayInput {
+  date:            String!
+  method:          ShareMethod!
+  recipientUserId: ID            # required for inapp; omit for link
+}
+
+input ImportSharedDayInput {
+  shareId:    ID!
+  targetDate: String!            # date to import the log into
+}
+
+input CreateLinkedMemberInput {
+  ownerId:  ID!
+  memberId: ID!
+}
+
+
+# ─────────────────────────────────────────────────────────────
+# QUERIES
+# ─────────────────────────────────────────────────────────────
+
+type Query {
+
+  # ── User ──────────────────────────────────────────────────
+
+  # Returns the currently authenticated user's profile
+  getMe: User!
+    @aws_cognito_user_pools
+
+  # Admin only — get any user by ID
+  getUser(userId: ID!): User
+    @aws_auth(cognito_groups: ["admin"])
+
+  # Admin only — paginated list of all users
+  listUsers(limit: Int, nextToken: String): UserConnection!
+    @aws_auth(cognito_groups: ["admin"])
+
+  # ── Food catalog ──────────────────────────────────────────
+
+  getFoodItem(foodId: ID!): FoodItem
+    @aws_cognito_user_pools
+
+  # Prefix search on food name; optional category filter
+  searchFoodItems(
+    query:     String!
+    category:  FoodCategory
+    limit:     Int
+    nextToken: String
+  ): FoodItemConnection!
+    @aws_cognito_user_pools
+
+  # Full catalog list (admin panel)
+  listFoodItems(
+    category:  FoodCategory
+    limit:     Int
+    nextToken: String
+  ): FoodItemConnection!
+    @aws_cognito_user_pools
+
+  # ── Serving sizes ─────────────────────────────────────────
+
+  getServingSizes(mealSlot: MealSlot!): [ServingSize!]!
+    @aws_cognito_user_pools
+
+  # ── Meal entries & summaries ──────────────────────────────
+
+  # Full daily summary with per-slot breakdown and goal progress
+  getDailySummary(
+    userId: ID!     # caller's own ID, or a linked member's ID
+    date:   String! # YYYY-MM-DD
+  ): DailySummary!
+    @aws_cognito_user_pools
+
+  # Raw entries for a single day (used when importing a shared log)
+  getMealEntries(
+    userId: ID!
+    date:   String!
+  ): [MealEntry!]!
+    @aws_cognito_user_pools
+
+  # Weekly summary for charts (7-day range)
+  getWeeklySummary(
+    userId:    ID!
+    startDate: String!  # YYYY-MM-DD
+    endDate:   String!  # YYYY-MM-DD
+  ): WeeklySummary!
+    @aws_cognito_user_pools
+
+  # Monthly summary for charts
+  getMonthlySummary(
+    userId: ID!
+    year:   Int!
+    month:  Int!        # 1–12
+  ): MonthlySummary!
+    @aws_cognito_user_pools
+
+  # ── Linked members ────────────────────────────────────────
+
+  # Returns all members the current user can proxy-log for
+  getLinkedMembers: [LinkedMember!]!
+    @aws_cognito_user_pools
+
+  # ── Sharing ───────────────────────────────────────────────
+
+  # Resolve a share by its URL token (called when recipient opens the link)
+  getSharedDayByToken(token: String!): SharedDay
+    @aws_cognito_user_pools
+
+  # List shares the current user has sent
+  listMyShares(
+    limit:     Int
+    nextToken: String
+  ): SharedDayConnection!
+    @aws_cognito_user_pools
+
+  # ── Notifications ─────────────────────────────────────────
+
+  getNotifications(
+    limit:     Int
+    nextToken: String
+  ): NotificationConnection!
+    @aws_cognito_user_pools
+}
+
+
+# ─────────────────────────────────────────────────────────────
+# MUTATIONS
+# ─────────────────────────────────────────────────────────────
+
+type Mutation {
+
+  # ── User management (admin only) ──────────────────────────
+
+  # Creates the Cognito user + DynamoDB profile and sends invite email
+  createUser(input: CreateUserInput!): User!
+    @aws_auth(cognito_groups: ["admin"])
+
+  # Update own profile (any user) or any profile (admin)
+  updateUser(input: UpdateUserInput!): User!
+    @aws_cognito_user_pools
+
+  deactivateUser(userId: ID!): User!
+    @aws_auth(cognito_groups: ["admin"])
+
+  # ── Food catalog (admin only) ─────────────────────────────
+
+  createFoodItem(input: CreateFoodItemInput!): FoodItem!
+    @aws_auth(cognito_groups: ["admin"])
+
+  updateFoodItem(input: UpdateFoodItemInput!): FoodItem!
+    @aws_auth(cognito_groups: ["admin"])
+
+  # Soft delete — sets status to "deleted"
+  deleteFoodItem(foodId: ID!): FoodItem!
+    @aws_auth(cognito_groups: ["admin"])
+
+  # ── Serving sizes (admin only) ────────────────────────────
+
+  createServingSize(input: CreateServingSizeInput!): ServingSize!
+    @aws_auth(cognito_groups: ["admin"])
+
+  deleteServingSize(sizeId: ID!): ServingSize!
+    @aws_auth(cognito_groups: ["admin"])
+
+  # ── Meal entries ──────────────────────────────────────────
+
+  # Resolver validates: caller owns targetUserId OR targetUserId is a linked member
+  # OR caller is admin. Calculates calories = (caloriesPer100g / 100) * grams.
+  createMealEntry(input: CreateMealEntryInput!): MealEntry!
+    @aws_cognito_user_pools
+
+  # Resolver recalculates calories when grams change
+  updateMealEntry(input: UpdateMealEntryInput!): MealEntry!
+    @aws_cognito_user_pools
+
+  deleteMealEntry(input: DeleteMealEntryInput!): MealEntry!
+    @aws_cognito_user_pools
+
+  # ── Linked members (admin only) ───────────────────────────
+
+  createLinkedMember(input: CreateLinkedMemberInput!): LinkedMember!
+    @aws_auth(cognito_groups: ["admin"])
+
+  deleteLinkedMember(linkId: ID!): LinkedMember!
+    @aws_auth(cognito_groups: ["admin"])
+
+  # ── Day sharing ───────────────────────────────────────────
+
+  # Creates a SharedDay record. For inapp: also creates a Notification
+  # for the recipient. For link: generates and stores a URL token.
+  shareDay(input: ShareDayInput!): SharedDay!
+    @aws_cognito_user_pools
+
+  # Sets SharedDay status to "revoked" and invalidates the token
+  revokeSharedDay(shareId: ID!): SharedDay!
+    @aws_cognito_user_pools
+
+  # Copies entries from the shared log into the caller's own log
+  # on the targetDate. Returns the count of entries imported.
+  importSharedDay(input: ImportSharedDayInput!): [MealEntry!]!
+    @aws_cognito_user_pools
+
+  # ── Notifications ─────────────────────────────────────────
+
+  markNotificationRead(notifId: ID!): Notification!
+    @aws_cognito_user_pools
+
+  markAllNotificationsRead: Boolean!
+    @aws_cognito_user_pools
+}
+
+
+# ─────────────────────────────────────────────────────────────
+# SUBSCRIPTIONS
+# ─────────────────────────────────────────────────────────────
+
+type Subscription {
+
+  # Real-time bell: fires when another user sends an in-app share
+  # or links a member. AppSync filters by the authenticated userId.
+  onNotification(userId: ID!): Notification
+    @aws_subscribe(mutations: ["shareDay", "createLinkedMember"])
+    @aws_cognito_user_pools
+}
+
+
+# ─────────────────────────────────────────────────────────────
+# RESOLVER NOTES (for AppSync Lambda / VTL implementation)
+# ─────────────────────────────────────────────────────────────
+#
+# createMealEntry
+#   1. Fetch FoodItem to get caloriesPer100g (snapshot)
+#   2. Calculate calories = round((caloriesPer100g / 100) * grams)
+#   3. Validate targetUserId ownership (self | linked member | admin)
+#   4. Write MealEntry to DynamoDB
+#
+# updateMealEntry
+#   1. Recalculate calories = round((caloriesPer100g / 100) * grams)
+#   2. Validate caller owns the entry or is admin
+#   3. Update item in DynamoDB
+#
+# getDailySummary
+#   1. Query DynamoDB: PK=USER#userId, SK begins_with LOG#<date>
+#   2. Group entries by mealSlot
+#   3. Sum calories per slot and total
+#   4. Fetch calorieGoal from User record
+#   5. Compute remaining and percentOfGoal
+#
+# getWeeklySummary / getMonthlySummary
+#   1. Query DynamoDB: PK=USER#userId, SK between LOG#<start> and LOG#<end>
+#   2. Group by date, sum calories per day
+#   3. Compare each day total against calorieGoal
+#   4. Compute aggregate stats
+#
+# shareDay (inapp)
+#   1. Write SharedDay record
+#   2. Write Notification record for recipientUserId
+#   3. Trigger onNotification subscription
+#
+# importSharedDay
+#   1. Fetch SharedDay — check status=active and expiresAt > now
+#   2. Fetch source MealEntries (getMealEntries for sharedByUserId on date)
+#   3. Write new MealEntry items for caller on targetDate
+#   4. Return new entries (caller can modify grams afterwards)
+# ─────────────────────────────────────────────────────────────
