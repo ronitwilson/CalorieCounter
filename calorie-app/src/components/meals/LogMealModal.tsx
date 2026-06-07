@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { X, Search, Zap } from 'lucide-react';
 import type { FoodItem, MealEntry, MealSlot, ServingSize } from '../../types';
 import { MEAL_SLOT_LABELS, MEAL_SLOTS } from '../../types';
-import { getFoodItems, getServingSizes, saveMealEntry, generateId } from '../../store/db';
+import { getFoodItems, getServingSizes, saveMealEntry, generateId } from '../../lib/api';
 import { calcCalories } from '../../utils/calories';
 import { useAuthStore } from '../../store/authStore';
 
@@ -29,30 +29,36 @@ export default function LogMealModal({
     editEntry?.mealSlot ?? initialSlot ?? 'breakfast',
   );
   const [search, setSearch] = useState(editEntry?.foodName ?? '');
+  const [allFoods, setAllFoods] = useState<FoodItem[]>([]);
   const [searchResults, setSearchResults] = useState<FoodItem[]>([]);
   const [selectedFood, setSelectedFood] = useState<FoodItem | null>(null);
   const [grams, setGrams] = useState<number>(editEntry?.grams ?? 100);
   const [servingSizes, setServingSizes] = useState<ServingSize[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const searchRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Load food item when editing
+  // Load food catalog once
   useEffect(() => {
-    if (editEntry) {
-      const foods = getFoodItems();
-      const food = foods.find((f) => f.foodId === editEntry.foodId);
+    getFoodItems().then(setAllFoods);
+  }, []);
+
+  // Pre-populate selected food when editing
+  useEffect(() => {
+    if (editEntry && allFoods.length > 0) {
+      const food = allFoods.find((f) => f.foodId === editEntry.foodId);
       if (food) setSelectedFood(food);
     }
-  }, [editEntry]);
+  }, [editEntry, allFoods]);
 
   // Load serving sizes when slot changes
   useEffect(() => {
-    setServingSizes(getServingSizes(selectedSlot));
+    getServingSizes(selectedSlot).then(setServingSizes);
   }, [selectedSlot]);
 
-  // Debounced search
+  // Debounced food search
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (!search.trim() || selectedFood) {
@@ -62,7 +68,7 @@ export default function LogMealModal({
     }
     debounceRef.current = setTimeout(() => {
       const query = search.toLowerCase().trim();
-      const results = getFoodItems()
+      const results = allFoods
         .filter(
           (f) =>
             f.status === 'active' &&
@@ -76,7 +82,7 @@ export default function LogMealModal({
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [search, selectedFood]);
+  }, [search, selectedFood, allFoods]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -104,25 +110,28 @@ export default function LogMealModal({
     setSearch('');
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!selectedFood || !currentUser) return;
-
-    const entry: MealEntry = {
-      entryId: editEntry?.entryId ?? generateId(),
-      userId,
-      date,
-      mealSlot: selectedSlot,
-      foodId: selectedFood.foodId,
-      foodName: selectedFood.name,
-      caloriesPer100g: selectedFood.caloriesPer100g,
-      grams,
-      calories: previewCalories,
-      loggedBy: currentUser.userId,
-      createdAt: editEntry?.createdAt ?? new Date().toISOString(),
-    };
-
-    saveMealEntry(entry);
-    onSaved();
+    setSaving(true);
+    try {
+      const entry: MealEntry = {
+        entryId: editEntry?.entryId ?? generateId(),
+        userId,
+        date,
+        mealSlot: selectedSlot,
+        foodId: selectedFood.foodId,
+        foodName: selectedFood.name,
+        caloriesPer100g: selectedFood.caloriesPer100g,
+        grams,
+        calories: previewCalories,
+        loggedBy: currentUser.userId,
+        createdAt: editEntry?.createdAt ?? new Date().toISOString(),
+      };
+      await saveMealEntry(entry);
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -145,9 +154,7 @@ export default function LogMealModal({
           {/* Meal slot selector */}
           {!initialSlot && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Meal Slot
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Meal Slot</label>
               <div className="grid grid-cols-2 gap-2">
                 {MEAL_SLOTS.map((slot) => (
                   <button
@@ -168,15 +175,10 @@ export default function LogMealModal({
 
           {/* Food search */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Food Item
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Food Item</label>
             <div className="relative" ref={searchRef}>
               <div className="relative flex items-center">
-                <Search
-                  size={16}
-                  className="absolute left-3 text-gray-400 pointer-events-none"
-                />
+                <Search size={16} className="absolute left-3 text-gray-400 pointer-events-none" />
                 <input
                   type="text"
                   value={search}
@@ -197,7 +199,6 @@ export default function LogMealModal({
                 )}
               </div>
 
-              {/* Dropdown */}
               {showDropdown && (
                 <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg z-20 max-h-48 overflow-y-auto">
                   {searchResults.map((food) => (
@@ -211,9 +212,7 @@ export default function LogMealModal({
                           <p className="text-sm font-medium text-gray-900">{food.name}</p>
                           <p className="text-xs text-gray-400">{food.category}</p>
                         </div>
-                        <span className="text-xs text-gray-500">
-                          {food.caloriesPer100g} kcal/100g
-                        </span>
+                        <span className="text-xs text-gray-500">{food.caloriesPer100g} kcal/100g</span>
                       </div>
                     </button>
                   ))}
@@ -259,9 +258,7 @@ export default function LogMealModal({
 
           {/* Custom grams input */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Grams
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Grams</label>
             <input
               type="number"
               min={1}
@@ -296,10 +293,10 @@ export default function LogMealModal({
           </button>
           <button
             onClick={handleSave}
-            disabled={!selectedFood}
+            disabled={!selectedFood || saving}
             className="flex-1 py-2.5 bg-indigo-600 disabled:bg-indigo-300 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 transition"
           >
-            {editEntry ? 'Save changes' : 'Add to log'}
+            {saving ? 'Saving…' : editEntry ? 'Save changes' : 'Add to log'}
           </button>
         </div>
       </div>

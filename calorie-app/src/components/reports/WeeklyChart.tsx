@@ -26,6 +26,7 @@ export default function WeeklyChart() {
 
   const [referenceDate, setReferenceDate] = useState(today());
   const [summary, setSummary] = useState<WeeklySummary | null>(null);
+  const [loading, setLoading] = useState(false);
 
   const navigate = useNavigate();
   const userId = activeUserId ?? currentUser?.userId ?? '';
@@ -33,7 +34,10 @@ export default function WeeklyChart() {
 
   useEffect(() => {
     if (!userId) return;
-    setSummary(buildWeeklySummary(userId, start, end));
+    setLoading(true);
+    buildWeeklySummary(userId, start, end)
+      .then(setSummary)
+      .finally(() => setLoading(false));
   }, [userId, start, end]);
 
   function prevWeek() {
@@ -47,6 +51,14 @@ export default function WeeklyChart() {
   function handleBarClick(dateStr: string) {
     setSelectedDate(dateStr);
     navigate('/');
+  }
+
+  if (loading) {
+    return (
+      <div className="flex justify-center py-16">
+        <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
   }
 
   if (!summary) return null;

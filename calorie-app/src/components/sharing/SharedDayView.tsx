@@ -6,7 +6,7 @@ import {
   getMealEntries,
   saveMealEntry,
   generateId,
-} from '../../store/db';
+} from '../../lib/api';
 import { useAuthStore } from '../../store/authStore';
 import { MEAL_SLOT_LABELS, MEAL_SLOTS } from '../../types';
 import type { SharedDay, MealEntry } from '../../types';
@@ -22,44 +22,54 @@ export default function SharedDayView() {
   const [importDate, setImportDate] = useState(today());
   const [imported, setImported] = useState(false);
   const [showImportForm, setShowImportForm] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   useEffect(() => {
     if (!token) {
       setSharedDay(null);
       return;
     }
-    const sd = getSharedDayByToken(token);
-    setSharedDay(sd ?? null);
-    if (sd) {
-      setEntries(getMealEntries(sd.sharedByUserId, sd.date));
-    }
+    getSharedDayByToken(token).then(async (sd) => {
+      if (!sd) {
+        setSharedDay(null);
+        return;
+      }
+      setSharedDay(sd);
+      const dayEntries = await getMealEntries(sd.sharedByUserId, sd.date);
+      setEntries(dayEntries);
+    });
   }, [token]);
 
-  function handleImport() {
+  async function handleImport() {
     if (!sharedDay || !currentUser) return;
     const targetUserId = activeUserId ?? currentUser.userId;
-
-    entries.forEach((entry) => {
-      const newEntry: MealEntry = {
-        ...entry,
-        entryId: generateId(),
-        userId: targetUserId,
-        date: importDate,
-        loggedBy: currentUser.userId,
-        createdAt: new Date().toISOString(),
-      };
-      saveMealEntry(newEntry);
-    });
-
-    setImported(true);
-    setShowImportForm(false);
+    setImporting(true);
+    try {
+      await Promise.all(
+        entries.map((entry) => {
+          const newEntry: MealEntry = {
+            ...entry,
+            entryId: generateId(),
+            userId: targetUserId,
+            date: importDate,
+            loggedBy: currentUser.userId,
+            createdAt: new Date().toISOString(),
+          };
+          return saveMealEntry(newEntry);
+        })
+      );
+      setImported(true);
+      setShowImportForm(false);
+    } finally {
+      setImporting(false);
+    }
   }
 
   // Loading state
   if (sharedDay === undefined) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <p className="text-gray-400 text-sm">Loading…</p>
+        <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
@@ -199,9 +209,10 @@ export default function SharedDayView() {
                   </div>
                   <button
                     onClick={handleImport}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl transition"
+                    disabled={importing}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white text-sm font-semibold rounded-xl transition"
                   >
-                    Confirm
+                    {importing ? 'Importing…' : 'Confirm'}
                   </button>
                 </div>
               )}

@@ -6,7 +6,7 @@ import {
   getNotifications,
   markNotificationReadById,
   markAllNotificationsReadForUser,
-} from '../../store/db';
+} from '../../lib/api';
 import type { Notification, NotificationType } from '../../types';
 
 function timeAgo(isoString: string): string {
@@ -46,17 +46,17 @@ export default function NotificationPanel({ open, onClose }: Props) {
 
   useEffect(() => {
     if (!currentUser) return;
-    setNotifications(getNotifications(currentUser.userId));
+    getNotifications(currentUser.userId).then(setNotifications);
   }, [currentUser, notificationsVersion, open]);
 
-  function handleMarkRead(notifId: string) {
-    markNotificationReadById(notifId);
+  async function handleMarkRead(notifId: string) {
+    await markNotificationReadById(notifId);
     refreshNotifications();
   }
 
-  function handleMarkAllRead() {
+  async function handleMarkAllRead() {
     if (!currentUser) return;
-    markAllNotificationsReadForUser(currentUser.userId);
+    await markAllNotificationsReadForUser(currentUser.userId);
     refreshNotifications();
   }
 

@@ -27,7 +27,8 @@ export default function DayView() {
 
   useEffect(() => {
     if (!userId) return;
-    setSummary(buildDailySummary(userId, selectedDate));
+    setSummary(null);
+    buildDailySummary(userId, selectedDate).then(setSummary);
   }, [userId, selectedDate, refreshKey]);
 
   function refresh() {
@@ -56,7 +57,13 @@ export default function DayView() {
     }
   })();
 
-  if (!summary) return null;
+  if (!summary) {
+    return (
+      <div className="flex items-center justify-center h-40">
+        <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   const remaining = summary.calorieGoal - summary.totalCalories;
   const isOver = remaining < 0;
@@ -130,16 +137,10 @@ export default function DayView() {
             <p className="text-xs text-gray-400">goal</p>
           </div>
           <div className="text-center">
-            <p
-              className={`text-2xl font-bold ${
-                isOver ? 'text-red-600' : 'text-green-600'
-              }`}
-            >
+            <p className={`text-2xl font-bold ${isOver ? 'text-red-600' : 'text-green-600'}`}>
               {isOver ? '+' : ''}{Math.abs(remaining).toLocaleString()}
             </p>
-            <p className="text-xs text-gray-400">
-              {isOver ? 'over goal' : 'remaining'}
-            </p>
+            <p className="text-xs text-gray-400">{isOver ? 'over goal' : 'remaining'}</p>
           </div>
         </div>
       </div>
@@ -155,7 +156,6 @@ export default function DayView() {
             key={slot}
             className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden"
           >
-            {/* Slot header */}
             <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-50">
               <div>
                 <h3 className="text-sm font-semibold text-gray-900">
@@ -174,7 +174,6 @@ export default function DayView() {
               </button>
             </div>
 
-            {/* Entries */}
             {entries.length === 0 ? (
               <div className="px-5 py-3">
                 <p className="text-sm text-gray-400 italic">No entries yet</p>
@@ -182,11 +181,7 @@ export default function DayView() {
             ) : (
               <div className="divide-y divide-gray-50">
                 {entries.map((entry) => (
-                  <MealEntryRow
-                    key={entry.entryId}
-                    entry={entry}
-                    onChanged={refresh}
-                  />
+                  <MealEntryRow key={entry.entryId} entry={entry} onChanged={refresh} />
                 ))}
               </div>
             )}
@@ -194,7 +189,6 @@ export default function DayView() {
         );
       })}
 
-      {/* Add meal modal */}
       {addSlot && (
         <LogMealModal
           userId={userId}
@@ -208,12 +202,8 @@ export default function DayView() {
         />
       )}
 
-      {/* Share day modal */}
       {showShare && (
-        <ShareDayModal
-          date={selectedDate}
-          onClose={() => setShowShare(false)}
-        />
+        <ShareDayModal date={selectedDate} onClose={() => setShowShare(false)} />
       )}
     </div>
   );

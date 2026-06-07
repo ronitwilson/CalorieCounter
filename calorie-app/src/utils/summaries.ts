@@ -7,110 +7,60 @@ import {
   type MealSlotSummary,
   MEAL_SLOTS,
 } from '../types';
-import { getMealEntries, getUser } from '../store/db';
+import { getMealEntries, getMealEntriesRange, getUser } from '../lib/api';
 import { getWeekRange, getMonthDays, addDays } from './calories';
 
 // ─── Daily Summary ────────────────────────────────────────────────────────────
 
-/**
- * Build a DailySummary for a given user and date (YYYY-MM-DD).
- * Reads meal entries from localStorage.
- */
-export function buildDailySummary(userId: string, date: string): DailySummary {
-  const user = getUser(userId);
+export async function buildDailySummary(
+  userId: string,
+  date: string,
+): Promise<DailySummary> {
+  const [entries, user] = await Promise.all([
+    getMealEntries(userId, date),
+    getUser(userId),
+  ]);
+
   const calorieGoal = user?.calorieGoal ?? 2000;
 
-  const entries: MealEntry[] = getMealEntries(userId, date);
-
-  // Aggregate by meal slot
   const byMealSlot: MealSlotSummary[] = MEAL_SLOTS.map((slot) => {
-    const slotEntries = entries.filter((e) => e.mealSlot === slot);
-    const totalCalories = slotEntries.reduce((sum, e) => sum + e.calories, 0);
+    const slotEntries = entries.filter((e: MealEntry) => e.mealSlot === slot);
     return {
       mealSlot: slot,
-      totalCalories,
+      totalCalories: slotEntries.reduce((sum: number, e: MealEntry) => sum + e.calories, 0),
       entries: slotEntries,
     };
   });
 
-  const totalCalories = byMealSlot.reduce(
-    (sum, s) => sum + s.totalCalories,
-    0,
-  );
+  const totalCalories = byMealSlot.reduce((sum, s) => sum + s.totalCalories, 0);
   const remaining = calorieGoal - totalCalories;
   const percentOfGoal =
-    calorieGoal > 0
-      ? Math.round((totalCalories / calorieGoal) * 1000) / 10 // 1 decimal place
-      : 0;
+    calorieGoal > 0 ? Math.round((totalCalories / calorieGoal) * 1000) / 10 : 0;
 
-  return {
-    userId,
-    date,
-    calorieGoal,
-    totalCalories,
-    remaining,
-    percentOfGoal,
-    byMealSlot,
-  };
-}
-
-// ─── Helper: build DayTotals for a single date ────────────────────────────────
-
-function buildDayTotals(
-  userId: string,
-  date: string,
-  calorieGoal: number,
-): DayTotals {
-  const entries = getMealEntries(userId, date);
-  const totalCalories = entries.reduce((sum, e) => sum + e.calories, 0);
-  return {
-    date,
-    totalCalories,
-    calorieGoal,
-    withinGoal: totalCalories <= calorieGoal,
-  };
-}
-
-// ─── Helper: generate all dates in [startDate, endDate] inclusive ─────────────
-
-function dateRange(startDate: string, endDate: string): string[] {
-  const dates: string[] = [];
-  let current = startDate;
-  // Walk forward until we exceed endDate
-  while (current <= endDate) {
-    dates.push(current);
-    current = addDays(current, 1);
-  }
-  return dates;
+  return { userId, date, calorieGoal, totalCalories, remaining, percentOfGoal, byMealSlot };
 }
 
 // ─── Weekly Summary ───────────────────────────────────────────────────────────
 
-/**
- * Build a WeeklySummary for a given user between two dates.
- * Typically startDate is Monday and endDate is Sunday of the same week,
- * but any range works.
- */
-export function buildWeeklySummary(
+export async function buildWeeklySummary(
   userId: string,
   startDate: string,
   endDate: string,
-): WeeklySummary {
-  const user = getUser(userId);
+): Promise<WeeklySummary> {
+  const [allEntries, user] = await Promise.all([
+    getMealEntriesRange(userId, startDate, endDate),
+    getUser(userId),
+  ]);
+
   const calorieGoal = user?.calorieGoal ?? 2000;
-
-  const dates = dateRange(startDate, endDate);
-
-  const days: DayTotals[] = dates.map((date) =>
-    buildDayTotals(userId, date, calorieGoal),
+  const days = buildDateRange(startDate, endDate).map((date) =>
+    buildDayTotals(date, allEntries, calorieGoal),
   );
 
-  const totalCalories = days.reduce((sum, d) => sum + d.totalCalories, 0);
   const daysWithData = days.filter((d) => d.totalCalories > 0);
+  const totalCalories = daysWithData.reduce((sum, d) => sum + d.totalCalories, 0);
   const averageCalories =
-    daysWithData.length > 0
-      ? Math.round(totalCalories / daysWithData.length)
-      : 0;
+    daysWithData.length > 0 ? Math.round(totalCalories / daysWithData.length) : 0;
   const daysWithinGoal = days.filter((d) => d.withinGoal && d.totalCalories > 0).length;
 
   return {
@@ -125,42 +75,37 @@ export function buildWeeklySummary(
   };
 }
 
-/**
- * Build a WeeklySummary for the week (Mon–Sun) containing the given date.
- */
-export function buildWeeklySummaryForDate(
+export async function buildWeeklySummaryForDate(
   userId: string,
   dateStr: string,
-): WeeklySummary {
+): Promise<WeeklySummary> {
   const { start, end } = getWeekRange(dateStr);
   return buildWeeklySummary(userId, start, end);
 }
 
 // ─── Monthly Summary ──────────────────────────────────────────────────────────
 
-/**
- * Build a MonthlySummary for a given user, year, and month (1-based).
- */
-export function buildMonthlySummary(
+export async function buildMonthlySummary(
   userId: string,
   year: number,
   month: number,
-): MonthlySummary {
-  const user = getUser(userId);
-  const calorieGoal = user?.calorieGoal ?? 2000;
-
+): Promise<MonthlySummary> {
   const dates = getMonthDays(year, month);
+  const startDate = dates[0];
+  const endDate = dates[dates.length - 1];
 
-  const days: DayTotals[] = dates.map((date) =>
-    buildDayTotals(userId, date, calorieGoal),
-  );
+  const [allEntries, user] = await Promise.all([
+    getMealEntriesRange(userId, startDate, endDate),
+    getUser(userId),
+  ]);
+
+  const calorieGoal = user?.calorieGoal ?? 2000;
+  const days = dates.map((date) => buildDayTotals(date, allEntries, calorieGoal));
 
   const daysWithData = days.filter((d) => d.totalCalories > 0);
   const totalCalories = daysWithData.reduce((sum, d) => sum + d.totalCalories, 0);
   const averageCalories =
-    daysWithData.length > 0
-      ? Math.round(totalCalories / daysWithData.length)
-      : 0;
+    daysWithData.length > 0 ? Math.round(totalCalories / daysWithData.length) : 0;
   const daysWithinGoal = daysWithData.filter((d) => d.withinGoal).length;
 
   return {
@@ -174,4 +119,26 @@ export function buildMonthlySummary(
     daysWithinGoal,
     daysLogged: daysWithData.length,
   };
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function buildDayTotals(
+  date: string,
+  allEntries: MealEntry[],
+  calorieGoal: number,
+): DayTotals {
+  const dayEntries = allEntries.filter((e) => e.date === date);
+  const totalCalories = dayEntries.reduce((sum, e) => sum + e.calories, 0);
+  return { date, totalCalories, calorieGoal, withinGoal: totalCalories <= calorieGoal };
+}
+
+function buildDateRange(startDate: string, endDate: string): string[] {
+  const dates: string[] = [];
+  let current = startDate;
+  while (current <= endDate) {
+    dates.push(current);
+    current = addDays(current, 1);
+  }
+  return dates;
 }

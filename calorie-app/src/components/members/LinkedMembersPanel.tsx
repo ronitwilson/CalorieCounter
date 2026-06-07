@@ -8,7 +8,7 @@ import {
   getUsers,
   generateId,
   saveNotification,
-} from '../../store/db';
+} from '../../lib/api';
 import { useAuthStore } from '../../store/authStore';
 import { useAppStore } from '../../store/appStore';
 
@@ -29,14 +29,10 @@ export default function LinkedMembersPanel() {
 
   useEffect(() => {
     if (!currentUser) return;
-    setMembers(getLinkedMembers(currentUser.userId));
+    getLinkedMembers(currentUser.userId).then(setMembers);
     if (isAdmin) {
-      setAllUsers(
-        getUsers().filter(
-          (u) =>
-            u.userId !== currentUser.userId &&
-            u.status === 'active',
-        ),
+      getUsers().then((users) =>
+        setAllUsers(users.filter((u) => u.userId !== currentUser.userId && u.status === 'active'))
       );
     }
   }, [currentUser, isAdmin, refreshKey]);
@@ -53,21 +49,19 @@ export default function LinkedMembersPanel() {
     if (currentUser) setActiveUser(currentUser.userId);
   }
 
-  function handleRemove(linkId: string) {
-    deleteLinkedMemberById(linkId);
-    // If currently logging for this member, switch back to self
+  async function handleRemove(linkId: string) {
     const member = members.find((m) => m.linkId === linkId);
+    await deleteLinkedMemberById(linkId);
     if (member && activeUserId === member.memberId && currentUser) {
       setActiveUser(currentUser.userId);
     }
     refresh();
   }
 
-  function handleAddMember() {
+  async function handleAddMember() {
     setAddError('');
     if (!selectedUserId || !currentUser) return;
 
-    // Check not already linked
     if (members.some((m) => m.memberId === selectedUserId)) {
       setAddError('This user is already linked.');
       return;
@@ -84,10 +78,9 @@ export default function LinkedMembersPanel() {
       linkedAt: new Date().toISOString(),
       linkedBy: currentUser.userId,
     };
-    saveLinkedMember(link);
+    await saveLinkedMember(link);
 
-    // Notify the linked member
-    saveNotification({
+    await saveNotification({
       notifId: generateId(),
       userId: memberUser.userId,
       type: 'member_linked',

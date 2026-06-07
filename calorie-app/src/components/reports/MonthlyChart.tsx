@@ -28,12 +28,16 @@ export default function MonthlyChart() {
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1); // 1-based
   const [summary, setSummary] = useState<MonthlySummary | null>(null);
+  const [loading, setLoading] = useState(false);
 
   const userId = activeUserId ?? currentUser?.userId ?? '';
 
   useEffect(() => {
     if (!userId) return;
-    setSummary(buildMonthlySummary(userId, year, month));
+    setLoading(true);
+    buildMonthlySummary(userId, year, month)
+      .then(setSummary)
+      .finally(() => setLoading(false));
   }, [userId, year, month]);
 
   function prevMonth() {
@@ -54,6 +58,14 @@ export default function MonthlyChart() {
     }
   }
 
+  if (loading) {
+    return (
+      <div className="flex justify-center py-16">
+        <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
   if (!summary) return null;
 
   // Build calendar grid: pad start with blanks to align Mon-Sun
@@ -64,7 +76,6 @@ export default function MonthlyChart() {
 
   // Day of week for the first of the month (0=Sun, 1=Mon, … 6=Sat)
   const firstDate = new Date(year, month - 1, 1);
-  // We want Monday=0 offset
   const rawDow = getDay(firstDate); // 0=Sun
   const startOffset = rawDow === 0 ? 6 : rawDow - 1; // Mon=0 … Sun=6
 

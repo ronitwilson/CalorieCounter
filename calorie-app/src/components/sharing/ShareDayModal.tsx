@@ -6,7 +6,7 @@ import {
   saveNotification,
   getUsers,
   generateId,
-} from '../../store/db';
+} from '../../lib/api';
 import { useAuthStore } from '../../store/authStore';
 import { useAppStore } from '../../store/appStore';
 
@@ -25,6 +25,7 @@ export default function ShareDayModal({ date, onClose }: Props) {
   const [token, setToken] = useState('');
   const [copied, setCopied] = useState(false);
   const [linkGenerated, setLinkGenerated] = useState(false);
+  const [generatingLink, setGeneratingLink] = useState(false);
 
   // User tab state
   const [search, setSearch] = useState('');
@@ -32,30 +33,35 @@ export default function ShareDayModal({ date, onClose }: Props) {
   const [sentTo, setSentTo] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    // Load users for the share-with-user tab
     if (currentUser) {
-      setUsers(getUsers().filter((u) => u.userId !== currentUser.userId && u.status === 'active'));
+      getUsers().then((all) =>
+        setUsers(all.filter((u) => u.userId !== currentUser.userId && u.status === 'active'))
+      );
     }
   }, [currentUser]);
 
-  function generateLink() {
+  async function generateLink() {
     if (!currentUser) return;
-    const newToken = generateId();
-    setToken(newToken);
-
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 days
-    saveSharedDay({
-      shareId: generateId(),
-      token: newToken,
-      sharedByUserId: currentUser.userId,
-      sharedByName: currentUser.name,
-      date,
-      method: 'link',
-      status: 'active',
-      expiresAt,
-      createdAt: new Date().toISOString(),
-    });
-    setLinkGenerated(true);
+    setGeneratingLink(true);
+    try {
+      const newToken = generateId();
+      setToken(newToken);
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      await saveSharedDay({
+        shareId: generateId(),
+        token: newToken,
+        sharedByUserId: currentUser.userId,
+        sharedByName: currentUser.name,
+        date,
+        method: 'link',
+        status: 'active',
+        expiresAt,
+        createdAt: new Date().toISOString(),
+      });
+      setLinkGenerated(true);
+    } finally {
+      setGeneratingLink(false);
+    }
   }
 
   function handleCopy() {
@@ -66,12 +72,12 @@ export default function ShareDayModal({ date, onClose }: Props) {
     });
   }
 
-  function handleShareWithUser(recipient: User) {
+  async function handleShareWithUser(recipient: User) {
     if (!currentUser) return;
     const shareId = generateId();
     const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
-    saveSharedDay({
+    await saveSharedDay({
       shareId,
       token: generateId(),
       sharedByUserId: currentUser.userId,
@@ -84,7 +90,7 @@ export default function ShareDayModal({ date, onClose }: Props) {
       createdAt: new Date().toISOString(),
     });
 
-    saveNotification({
+    await saveNotification({
       notifId: generateId(),
       userId: recipient.userId,
       type: 'share_received',
@@ -163,10 +169,11 @@ export default function ShareDayModal({ date, onClose }: Props) {
               {!linkGenerated ? (
                 <button
                   onClick={generateLink}
-                  className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold transition flex items-center justify-center gap-2"
+                  disabled={generatingLink}
+                  className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-xl text-sm font-semibold transition flex items-center justify-center gap-2"
                 >
                   <Link2 size={15} />
-                  Generate Link
+                  {generatingLink ? 'Generating…' : 'Generate Link'}
                 </button>
               ) : (
                 <div className="space-y-3">

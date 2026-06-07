@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { Bell, LogOut, ChevronDown, Users } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import { useAppStore } from '../../store/appStore';
-import { getLinkedMembers, getNotifications } from '../../store/db';
+import { getLinkedMembers, getNotifications } from '../../lib/api';
+import type { LinkedMember } from '../../types';
 import NotificationPanel from './NotificationPanel';
 
 export default function Header() {
@@ -15,15 +16,20 @@ export default function Header() {
   const [showMemberDropdown, setShowMemberDropdown] = useState(false);
   const [showNotifPanel, setShowNotifPanel] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [linkedMembers, setLinkedMembers] = useState<LinkedMember[]>([]);
 
   const memberDropdownRef = useRef<HTMLDivElement>(null);
 
-  const linkedMembers = currentUser ? getLinkedMembers(currentUser.userId) : [];
+  useEffect(() => {
+    if (!currentUser) return;
+    getLinkedMembers(currentUser.userId).then(setLinkedMembers);
+  }, [currentUser]);
 
   useEffect(() => {
     if (!currentUser) return;
-    const notifs = getNotifications(currentUser.userId);
-    setUnreadCount(notifs.filter((n) => !n.read).length);
+    getNotifications(currentUser.userId).then((notifs) => {
+      setUnreadCount(notifs.filter((n) => !n.read).length);
+    });
   }, [currentUser, notificationsVersion]);
 
   // Close dropdown when clicking outside
@@ -42,17 +48,11 @@ export default function Header() {
 
   if (!currentUser) return null;
 
-  const activeUser =
-    activeUserId === currentUser.userId
-      ? currentUser
-      : linkedMembers.find((lm) => lm.memberId === activeUserId);
-
+  const activeLinkedMember = linkedMembers.find((lm) => lm.memberId === activeUserId);
   const activeLabel =
     activeUserId === currentUser.userId
       ? currentUser.name
-      : activeUser && 'memberName' in activeUser
-      ? activeUser.memberName
-      : currentUser.name;
+      : activeLinkedMember?.memberName ?? currentUser.name;
 
   return (
     <>

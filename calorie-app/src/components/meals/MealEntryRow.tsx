@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Edit2, Trash2 } from 'lucide-react';
 import type { MealEntry, MealSlot } from '../../types';
 import LogMealModal from './LogMealModal';
-import { deleteMealEntryById } from '../../store/db';
+import { deleteMealEntryById } from '../../lib/api';
 
 interface Props {
   entry: MealEntry;
@@ -12,28 +12,31 @@ interface Props {
 export default function MealEntryRow({ entry, onChanged }: Props) {
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
-  function handleDelete() {
-    deleteMealEntryById(entry.entryId);
-    onChanged();
-    setConfirming(false);
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      await deleteMealEntryById(entry.entryId);
+      onChanged();
+    } finally {
+      setDeleting(false);
+      setConfirming(false);
+    }
   }
 
   return (
     <>
       <div className="flex items-center gap-3 py-2.5 px-4 hover:bg-gray-50 rounded-xl transition group">
-        {/* Food name */}
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-gray-900 truncate">{entry.foodName}</p>
           <p className="text-xs text-gray-400">{entry.grams}g</p>
         </div>
 
-        {/* Calories */}
         <div className="flex-shrink-0 text-sm font-semibold text-gray-700 w-16 text-right">
           {entry.calories} kcal
         </div>
 
-        {/* Actions */}
         <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
           <button
             onClick={() => setEditing(true)}
@@ -46,9 +49,10 @@ export default function MealEntryRow({ entry, onChanged }: Props) {
             <div className="flex items-center gap-1">
               <button
                 onClick={handleDelete}
-                className="text-xs bg-red-500 text-white px-2 py-0.5 rounded font-medium hover:bg-red-600 transition"
+                disabled={deleting}
+                className="text-xs bg-red-500 text-white px-2 py-0.5 rounded font-medium hover:bg-red-600 transition disabled:opacity-60"
               >
-                Delete
+                {deleting ? '…' : 'Delete'}
               </button>
               <button
                 onClick={() => setConfirming(false)}

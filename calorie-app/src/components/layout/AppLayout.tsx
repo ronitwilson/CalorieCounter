@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Outlet, NavLink } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -12,8 +12,9 @@ import {
   UserCheck,
 } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
-import { getUser } from '../../store/db';
+import { getUser } from '../../lib/api';
 import Header from './Header';
+import type { User } from '../../types';
 
 const navLinkBase =
   'flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors';
@@ -25,9 +26,18 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
   const activeUserId = useAuthStore((s) => s.activeUserId);
   const setActiveUser = useAuthStore((s) => s.setActiveUser);
 
+  const [proxiedUser, setProxiedUser] = useState<User | null>(null);
+
   const isAdmin = currentUser?.role === 'admin';
   const isProxy = currentUser && activeUserId !== currentUser.userId;
-  const proxiedUser = isProxy && activeUserId ? getUser(activeUserId) : null;
+
+  useEffect(() => {
+    if (isProxy && activeUserId) {
+      getUser(activeUserId).then((u) => setProxiedUser(u ?? null));
+    } else {
+      setProxiedUser(null);
+    }
+  }, [isProxy, activeUserId]);
 
   function linkCls({ isActive }: { isActive: boolean }) {
     return `${navLinkBase} ${isActive ? navLinkActive : navLinkInactive}`;

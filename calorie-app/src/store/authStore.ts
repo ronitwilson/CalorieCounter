@@ -1,57 +1,42 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import {
+  signIn,
+  signOut,
+  fetchAuthSession,
+  confirmSignIn,
+} from 'aws-amplify/auth';
 import type { User } from '../types';
-import { getUserByEmail, getUser } from './db';
-
-// ─── Demo password logic ──────────────────────────────────────────────────────
-// All users share the password 'password123'.
-// The admin account also accepts 'admin123'.
-
-function checkPassword(user: User, password: string): boolean {
-  if (user.role === 'admin') {
-    return password === 'admin123' || password === 'password123';
-  }
-  return password === 'password123';
-}
-
-// ─── State Interface ──────────────────────────────────────────────────────────
+import { getUser } from '../lib/api';
 
 interface AuthState {
-  /** The authenticated user (null if not logged in) */
   currentUser: User | null;
   /**
-   * The userId currently being logged for.
-   * Equals currentUser.userId for normal logging,
-   * or a linked member's userId for proxy logging.
+   * userId currently being logged for.
+   * Equals currentUser.userId for normal logging;
+   * differs when proxy-logging for a linked member.
    */
   activeUserId: string | null;
 
-  /**
-   * Attempt to log in with the given credentials.
-   * Returns { success: true } on success or { success: false, error } on failure.
-   */
   login: (
     email: string,
     password: string,
+  ) => Promise<{ success: boolean; error?: string; requiresNewPassword?: boolean }>;
+
+  /**
+   * Complete forced password reset (first sign-in after admin invite).
+   */
+  completeNewPassword: (
+    newPassword: string,
   ) => Promise<{ success: boolean; error?: string }>;
 
-  /** Clear auth state. */
-  logout: () => void;
+  logout: () => Promise<void>;
 
-  /**
-   * Switch the active user for proxy logging.
-   * Can be the current user's own userId or a linked member's userId.
-   */
   setActiveUser: (userId: string) => void;
 
-  /**
-   * Re-read the current user from the db store.
-   * Call this after updating profile data so the UI reflects changes.
-   */
-  refreshCurrentUser: () => void;
+  /** Re-fetch currentUser profile from DynamoDB (e.g. after calorieGoal update). */
+  refreshCurrentUser: () => Promise<void>;
 }
-
-// ─── Store ────────────────────────────────────────────────────────────────────
 
 export const useAuthStore = create<AuthState>()(
   persist(
@@ -59,48 +44,68 @@ export const useAuthStore = create<AuthState>()(
       currentUser: null,
       activeUserId: null,
 
-      login: async (email: string, password: string) => {
-        const user = getUserByEmail(email.trim());
+      login: async (email, password) => {
+        try {
+          const result = await signIn({
+            username: email.trim(),
+            password,
+          });
 
-        if (!user) {
-          return { success: false, error: 'No account found with that email.' };
+          // Admin-invited user must set a new password on first sign-in
+          if (
+            result.nextStep?.signInStep === 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED'
+          ) {
+            return { success: false, requiresNewPassword: true };
+          }
+
+          if (!result.isSignedIn) {
+            return { success: false, error: 'Sign-in not completed.' };
+          }
+
+          return await loadCurrentUser();
+        } catch (err) {
+          const message =
+            err instanceof Error ? err.message : 'Login failed. Please try again.';
+          return { success: false, error: message };
         }
-
-        if (user.status === 'inactive') {
-          return {
-            success: false,
-            error: 'Your account has been deactivated. Please contact admin.',
-          };
-        }
-
-        if (!checkPassword(user, password)) {
-          return { success: false, error: 'Incorrect password.' };
-        }
-
-        set({ currentUser: user, activeUserId: user.userId });
-        return { success: true };
       },
 
-      logout: () => {
+      completeNewPassword: async (newPassword) => {
+        try {
+          const result = await confirmSignIn({
+            challengeResponse: newPassword,
+          });
+          if (!result.isSignedIn) {
+            return { success: false, error: 'Password reset not completed.' };
+          }
+          return await loadCurrentUser();
+        } catch (err) {
+          const message =
+            err instanceof Error ? err.message : 'Password reset failed.';
+          return { success: false, error: message };
+        }
+      },
+
+      logout: async () => {
+        await signOut();
         set({ currentUser: null, activeUserId: null });
       },
 
-      setActiveUser: (userId: string) => {
+      setActiveUser: (userId) => {
         set({ activeUserId: userId });
       },
 
-      refreshCurrentUser: () => {
+      refreshCurrentUser: async () => {
         const { currentUser } = get();
         if (!currentUser) return;
-        const fresh = getUser(currentUser.userId);
+        const fresh = await getUser(currentUser.userId);
         if (fresh) {
-          set({ currentUser: fresh });
+          set({ currentUser: { ...fresh, role: currentUser.role } });
         }
       },
     }),
     {
       name: 'ct_auth',
-      // Only persist the minimal auth state; actions are recreated on load
       partialize: (state) => ({
         currentUser: state.currentUser,
         activeUserId: state.activeUserId,
@@ -108,3 +113,40 @@ export const useAuthStore = create<AuthState>()(
     },
   ),
 );
+
+// ─── Helper ───────────────────────────────────────────────────────────────────
+
+async function loadCurrentUser(): Promise<{ success: boolean; error?: string }> {
+  const session = await fetchAuthSession();
+  const sub = session.tokens?.idToken?.payload?.sub as string | undefined;
+  if (!sub) return { success: false, error: 'Could not retrieve user identity.' };
+
+  // Determine role from Cognito group membership
+  const groups =
+    (session.tokens?.accessToken?.payload?.['cognito:groups'] as string[] | undefined) ?? [];
+  const cognitoRole = groups.includes('admin') ? 'admin' : 'user';
+
+  const profile = await getUser(sub);
+  if (!profile) {
+    await signOut();
+    return {
+      success: false,
+      error: 'User profile not found. Please contact an administrator.',
+    };
+  }
+
+  if (profile.status === 'inactive') {
+    await signOut();
+    return {
+      success: false,
+      error: 'Your account has been deactivated. Please contact an administrator.',
+    };
+  }
+
+  useAuthStore.setState({
+    currentUser: { ...profile, role: cognitoRole as 'admin' | 'user' },
+    activeUserId: sub,
+  });
+
+  return { success: true };
+}
